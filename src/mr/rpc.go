@@ -24,6 +24,28 @@ type ExampleReply struct {
 
 // Add your RPC definitions here.
 
+type TaskReplyFlag int
+
+const (
+	TaskGetted TaskReplyFlag = iota
+	WaitPlz
+	FinishedAndExit
+)
+
+type TaskArgs struct {
+}
+
+type TaskReply struct {
+	TaskFlag TaskReplyFlag
+	Task     Task
+}
+
+type FinArgs struct {
+	TaskId int
+}
+
+type FinReply struct {
+}
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.

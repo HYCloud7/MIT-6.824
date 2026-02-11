@@ -25,5 +25,6 @@ func main() {
 		time.Sleep(time.Second)
 	}
 
+	fmt.Print("coordinator is exiting...\n")
 	time.Sleep(time.Second)
 }
