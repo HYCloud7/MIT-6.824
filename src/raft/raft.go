@@ -1017,11 +1017,11 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	// 接受leader的被动快照前先检查给server是否正在进行主动快照，若是则本次被动快照取消
 	// 避免主、被动快照重叠应用导致上层kvserver状态与下层raft日志不一致
-	if rf.activeSnapshotting {
-		reply.Term = rf.currentTerm
-		reply.Accept = false
-		return
-	}
+	// if rf.activeSnapshotting {
+	// 	reply.Term = rf.currentTerm
+	// 	reply.Accept = false
+	// 	return
+	// }
 
 	if args.Term > rf.currentTerm {
 		rf.voteFor = -1            // 当term发生变化时，需要重置votedFor
@@ -1040,11 +1040,17 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	snapshotTerm := args.LastIncludedTerm
 	reply.Term = rf.currentTerm
 
-	if snapshotIndex <= rf.lastIncludedIndex { // 说明snapshotIndex之前的log已经做成snapshot并删除了
+	if snapshotIndex < rf.lastIncludedIndex { // 说明snapshotIndex之前的log已经做成snapshot并删除了
 		DPrintf("Server %d refuse the snapshot from leader.\n", rf.me)
 		reply.Accept = false
 		return
 	}
+
+	if snapshotIndex == rf.lastIncludedIndex { // 如果此时leader发来的快照和本地的快照一样，则说明leader之前发过这个快照了，可能是由于网络原因导致follower没有收到RPC回复而重试
+		DPrintf("Server %d receive the same snapshot snapshotIndex=%d from leader.\n", rf.me, snapshotIndex)
+		reply.Accept = true
+		return
+	}	
 
 	// 如果leader传来的快照比本地的快照更新
 	rf.lastApplied = args.LastIncludedIndex // 下一条指令直接从快照后开始（重新）apply
@@ -1069,7 +1075,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.lastIncludedIndex = args.LastIncludedIndex
 	rf.lastIncludedTerm = args.LastIncludedTerm
 	rf.log = newLog
-	rf.passiveSnapshotting = true
+	// rf.passiveSnapshotting = true
 
 	rf.persist() // 持久化状态
 	rf.persister.SaveStateAndSnapshot(rf.persister.ReadRaftState(), args.SnapshotData)
@@ -1146,6 +1152,12 @@ func (rf *Raft) InstallSnapFromLeader(snapshotTerm int, snapshotIndex int, snaps
 func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int, snapshot []byte) bool {
 
 	// Your code here (2D).
+	// rf.mu.Lock()
+	// defer rf.mu.Unlock()
+	// fmt.Printf("Server %d receive snapshot request(lastIncludedTerm:%d, lastIncludedIndex:%d) rf.lastIncludedIndex:%d, rf.lastIncludedTerm:%d.\n", rf.me, lastIncludedTerm, lastIncludedIndex, rf.lastIncludedIndex, rf.lastIncludedTerm)
+	// if(lastIncludedTerm < rf.lastIncludedTerm) || (lastIncludedIndex < rf.lastIncludedIndex) {
+	// 	return false
+	// }
 	return true
 }
 
