@@ -408,7 +408,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			reply.ConflictTerm = -1
 		} else { // 如果follower在其日志中确实有prevLogIndex，但是任期不匹配
 			reply.ConflictTerm = rf.log[args.PreLogIndex-rf.lastIncludedIndex].Term
-			i := args.PreLogIndex - 1 -rf.lastIncludedIndex
+			i := args.PreLogIndex - 1 - rf.lastIncludedIndex
 			for i >= 0 && rf.log[i].Term == reply.ConflictTerm { // 在其日志中搜索其条目中任期等于conflictTerm的第一个索引
 				i--
 			}
@@ -432,7 +432,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			}
 		}
 		if misMatchIndex != -1 { // 处理日志有冲突的情况
-			newLog := rf.log[:misMatchIndex-rf.lastIncludedIndex]                                            // 从头截取到misMatchIndex（但不包括）的是一致的日志
+			newLog := rf.log[:misMatchIndex-rf.lastIncludedIndex]                       // 从头截取到misMatchIndex（但不包括）的是一致的日志
 			newLog = append(newLog, args.Entries[misMatchIndex-args.PreLogIndex-1:]...) // 追加日志中没有的任何新条目（也即leader在preLogIndex之后的日志）
 			rf.log = newLog
 		}
@@ -1050,7 +1050,7 @@ func (rf *Raft) InstallSnapshot(args *InstallSnapshotArgs, reply *InstallSnapsho
 		DPrintf("Server %d receive the same snapshot snapshotIndex=%d from leader.\n", rf.me, snapshotIndex)
 		reply.Accept = true
 		return
-	}	
+	}
 
 	// 如果leader传来的快照比本地的快照更新
 	rf.lastApplied = args.LastIncludedIndex // 下一条指令直接从快照后开始（重新）apply
@@ -1159,6 +1159,11 @@ func (rf *Raft) CondInstallSnapshot(lastIncludedTerm int, lastIncludedIndex int,
 	// 	return false
 	// }
 	return true
+}
+
+// 返回raft state size的字节数
+func (rf *Raft) GetRaftStateSize() int {
+	return rf.persister.RaftStateSize()
 }
 
 // the service says it has created a snapshot that has
