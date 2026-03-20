@@ -1176,7 +1176,6 @@ func (rf *Raft) GetRaftStateSize() int {
 func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	// Your code here (2D).
 	rf.mu.Lock()
-
 	// 如果主动快照的index不大于rf之前的lastIncludedIndex（这次快照其实是重复或更旧的），则不应用该快照
 	if index <= rf.lastIncludedIndex {
 		DPrintf("Server %d refuse this positive snapshot(index=%v, rf.lastIncludedIndex=%v).\n", rf.me, index, rf.lastIncludedIndex)
@@ -1199,18 +1198,18 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	state := rf.persister.ReadRaftState()
 	rf.persister.SaveStateAndSnapshot(state, snapshot)
 
-	isLeader := (rf.state == Leader)
+	// isLeader := (rf.state == Leader)
 	rf.mu.Unlock()
 
-	// leader通过InstallSnapshot RPC将本次的SnapShot信息发送给其他Follower
-	if isLeader {
-		for i, _ := range rf.peers {
-			if i == rf.me {
-				continue
-			}
-			go rf.LeaderSendSnapshot(i, snapshot)
-		}
-	}
+	// // leader通过InstallSnapshot RPC将本次的SnapShot信息发送给其他Follower
+	// if isLeader {
+	// 	for i, _ := range rf.peers {
+	// 		if i == rf.me {
+	// 			continue
+	// 		}
+	// 		go rf.LeaderSendSnapshot(i, snapshot)
+	// 	}
+	// }
 }
 
 func (rf *Raft) recoverFromSnap(snapshot []byte) {
@@ -1227,7 +1226,7 @@ func (rf *Raft) recoverFromSnap(snapshot []byte) {
 		CommandValid:  false,
 		SnapshotIndex: rf.lastIncludedIndex,
 		SnapshotTerm:  rf.lastIncludedTerm,
-		Snapshot:      snapshot, // sm_state
+		Snapshot:      snapshot,
 	}
 
 	go func(msg ApplyMsg) {

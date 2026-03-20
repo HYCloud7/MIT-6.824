@@ -194,21 +194,6 @@ func (kv *KVServer) applyMessage() {
 
 			kv.mu.Lock()
 
-			// if applyMsg.CommandIndex <= kv.logLastApplied {
-			// 	kv.mu.Unlock()
-			// 	continue
-			// }
-
-			// 如果上一个取出的是被动快照且已安装完，则要注意排除“跨快照指令”
-			// 因为被动快照安装完后，后续的指令应该从快照结束的index之后紧接着逐个apply
-			// if kv.passiveSnapshotBefore {
-			// 	if applyMsg.CommandIndex-kv.logLastApplied != 1 {
-			// 		kv.mu.Unlock()
-			// 		continue
-			// 	}
-			// 	kv.passiveSnapshotBefore = false
-			// }
-
 			// 否则就将logLastApplied更新为较大值applyMsg.CommandIndex
 			kv.logLastApplied = applyMsg.CommandIndex
 			DPrintf("KVServer[%d] update logLastApplied to %d.\n", kv.me, kv.logLastApplied)
@@ -221,9 +206,14 @@ func (kv *KVServer) applyMessage() {
 				sessionRec, exist := kv.sessions[op.ClientId]
 
 				// 如果apply的指令之前已经apply过且不是Get指令则不重复执行，直接返回session中保存的结果
-				if exist && op.OpType != OpGet && op.CmdNum <= sessionRec.LastCmdNum { // 若为重复的Get请求可以重复执行
+				if exist && op.OpType != OpGet && op.CmdNum <= sessionRec.LastCmdNum {
 					reply = kv.sessions[op.ClientId].Response // 返回session中记录的回复
-					DPrintf("KVServer[%d] use the reply(=%v) in sessions for %v.\n", kv.me, reply, op.OpType)
+					if _, existCh := kv.notifyChMap[applyMsg.CommandIndex]; existCh {
+						if currentTerm, isLeader := kv.rf.GetState(); isLeader && applyMsg.CommandTerm == currentTerm {
+							kv.notifyChMap[applyMsg.CommandIndex] <- reply
+							DPrintf("KVServer[%d] use the reply(=%v) in sessions for OP[ClientId:%d, CmdNum:%d].\n", kv.me, reply, op.ClientId, op.CmdNum)
+						}
+					}
 				} else { // 没有apply过的指令就在状态机上执行，重复的Get指令可以重新执行
 					switch op.OpType {
 					case OpGet:
@@ -270,29 +260,10 @@ func (kv *KVServer) applyMessage() {
 							kv.notifyChMap[applyMsg.CommandIndex] <- reply
 						}
 					}
-
-					// 主动检查是否需要打包日志
-					if kv.maxraftstate != -1 && float32(kv.rf.GetRaftStateSize())/float32(kv.maxraftstate) > 0.9 {
-						// 准备进行主动快照
-						DPrintf("KVServer[%d]: The Raft state size is approaching the maxraftstate, Start to snapshot...\n", kv.me)
-						snapshotIndex := kv.logLastApplied
-
-						// 将snapshot 信息编码
-						w := new(bytes.Buffer)
-						e := labgob.NewEncoder(w)
-						e.Encode(kv.kvDB)
-						e.Encode(kv.sessions)
-
-						snapshotData := w.Bytes()
-
-						if snapshotData != nil {
-							kv.rf.Snapshot(snapshotIndex, snapshotData) // kvserver命令raft进行快照（截止到index）
-						}
-					}
 				}
 			}
 			kv.mu.Unlock()
-		} else if applyMsg.SnapshotValid { // 如果取出的是snapshot
+		} else if applyMsg.SnapshotValid { // 如果取出的是snapshot(被动快照)
 			DPrintf("KVServer[%d] get a Snapshot applyMsg from applyCh.\n", kv.me)
 
 			// 在raft层已经实现了follower是否安装快照的判断
@@ -301,11 +272,11 @@ func (kv *KVServer) applyMessage() {
 			kv.applySnapshotToSM(applyMsg.Snapshot)    // 将快照应用到状态机
 			kv.logLastApplied = applyMsg.SnapshotIndex // 更新logLastApplied避免回滚
 			// kv.passiveSnapshotBefore = true            // 刚安装完被动快照，提醒下一个从channel中取出的若是指令则注意是否为“跨快照指令”
-			kv.mu.Lock()
+			kv.mu.Unlock()
 
 			DPrintf("KVServer[%d] finish a negative Snapshot, kv.logLastApplied become %v.\n", kv.me, kv.logLastApplied)
 
-			kv.rf.SetPassiveSnapshottingFlag(false) // kvserver已将被动快照安装完成，修改对应raft的passiveSnapshotting标志
+			// kv.rf.SetPassiveSnapshottingFlag(false) // kvserver已将被动快照安装完成，修改对应raft的passiveSnapshotting标志
 		} else {
 			DPrintf("KVServer[%d] get an unexpected ApplyMsg!\n", kv.me)
 		}
@@ -328,6 +299,37 @@ func (kv *KVServer) applySnapshotToSM(data []byte) {
 	} else {
 		kv.kvDB = kvDB
 		kv.sessions = sessions
+	}
+}
+
+// kvserver定期检查是否需要快照（主动进行快照）
+func (kv *KVServer) checkNeedSnapshot() {
+	for !kv.killed() {
+
+		if kv.maxraftstate != -1 && float32(kv.rf.GetRaftStateSize())/float32(kv.maxraftstate) > 0.9 {
+			kv.mu.Lock()
+			// 准备进行主动快照
+			DPrintf("KVServer[%d]: The Raft state size is approaching the maxraftstate, Start to snapshot, snapshotIndex[%d]\n", kv.me, kv.logLastApplied)
+			snapshotIndex := kv.logLastApplied
+
+			// 将snapshot 信息编码
+			w := new(bytes.Buffer)
+			e := labgob.NewEncoder(w)
+			e.Encode(kv.kvDB)
+			e.Encode(kv.sessions)
+
+			snapshotData := w.Bytes()
+			kv.mu.Unlock()
+
+			if snapshotData != nil {
+				kv.rf.Snapshot(snapshotIndex, snapshotData) // kvserver命令raft进行快照（截止到index）
+			} else {
+				DPrintf("KVServer[%d]: falild to Snapshot[%d] because snapshotData is nil!!!\n", kv.me, kv.logLastApplied)
+			}
+			
+		}
+
+		time.Sleep(time.Millisecond * 50) // 检查间隔50ms
 	}
 }
 
@@ -369,6 +371,9 @@ func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persiste
 
 	// 开启goroutine来apply日志或者快照
 	go kv.applyMessage()
+
+	// 开启goroutine来进行主动快照
+	go kv.checkNeedSnapshot()
 
 	return kv
 }

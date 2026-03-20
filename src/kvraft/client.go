@@ -129,7 +129,7 @@ func (ck *Clerk) PutAppend(key string, value string, op OpType) {
 
 		reply := PutAppendReply{}
 
-		DPrintf("Client[%d] request [%d] for PutAppend(key:%v, value:%v)......\n", ck.clientId, i, args.Key, args.Value)
+		DPrintf("Client[%d] request [%d] seq:[%d] for PutAppend(key:%v, value:%v)......\n", ck.clientId, i, args.CmdNum, args.Key, args.Value)
 		ok := ck.servers[i].Call("KVServer.PutAppend", &args, &reply)
 
 		if !ok {

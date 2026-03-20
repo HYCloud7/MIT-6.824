@@ -248,6 +248,7 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 	}
 	for i := 0; i < 3; i++ {
 		// log.Printf("Iteration %v\n", i)
+		// fmt.Printf("----------> [%d] loop start <----------\n", i)
 		atomic.StoreInt32(&done_clients, 0)
 		atomic.StoreInt32(&done_partitioner, 0)
 		go spawn_clients_and_wait(t, cfg, nclients, func(cli int, myck *Clerk, t *testing.T) {
@@ -358,6 +359,7 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 				t.Fatalf("snapshot too large (%v), should not be used when maxraftstate = %d", ssz, maxraftstate)
 			}
 		}
+		// fmt.Printf("----------> [%d] loop end <----------\n", i)
 	}
 
 	res, info := porcupine.CheckOperationsVerbose(models.KvModel, opLog.Read(), linearizabilityCheckTimeout)
